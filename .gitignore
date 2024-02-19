@@ -40,3 +40,13 @@ bin/
 
 ### Mac OS ###
 .DS_Store
+
+src/main/java/Main.java
+.gradle
+build.gradle.kts
+gradlew
+
+gradlew.bat
+Peasys.iml
+settings.gradle.kts
+.idea

@@ -32,8 +32,11 @@ public class PeaClient {
 
     /**
      * Initialize a new instance of the PeaClient class. Initiates a connexion with the AS/400 server.
-     *
-     * @param partitionName      DNS name (name of the partition) of the remote AS/400 server.
+     * @param partitionName DNS name (name of the partition) of the remote AS/400 server.
+     * @param port Port used for the data exchange between the client and the server.
+     * @param userName Username of the AS/400 profile used for connexion.
+     * @param password Password of the AS/400 profile used for connexion.
+     * @param licenseKey License key delivered by DIPS after subscription.
      * @param retrieveStatistics Set to true if you want the statistics of the license key use to be collect.
      * @throws PeaConnexionException Exception thrown when the client was not able to successfully connect to the server.
      */
@@ -263,6 +266,7 @@ public class PeaClient {
      * @return An instance of the PeaCreateResponse object.
      * @throws PeaInvalidSyntaxQueryException Thrown if the query syntax is invalid.
      * @throws IOException                    Thrown if the connexion is lost when sending this query.
+     * @throws PeaUnsupportedOperationException Thrown if the query is used to create something else than a table, an index or a database.
      */
     public PeaCreateResponse executeCreate(String query) throws IOException, PeaInvalidSyntaxQueryException, PeaUnsupportedOperationException {
         if (query.isEmpty()) throw new PeaInvalidSyntaxQueryException("Query should not be either null or empty");
@@ -331,11 +335,13 @@ public class PeaClient {
      * Sends the ALTER SQL query to the server that execute it and retrieve the desired data.
      *
      * @param query SQL query that should start with the ALTER keyword.
+     * @param retrieveTableSchema Set to true if the call should return the table schema.
      * @return An instance of the PeaAlterResponse object.
      * @throws PeaInvalidSyntaxQueryException Thrown if the query syntax is invalid.
      * @throws IOException                    Thrown if the connexion is lost when sending this query.
+     * @throws PeaUnsupportedOperationException Thrown when retrieving the table schema.
      */
-    public PeaAlterResponse executeAlter(String query, boolean retrieveTableSchema) throws PeaInvalidSyntaxQueryException, IOException {
+    public PeaAlterResponse executeAlter(String query, boolean retrieveTableSchema) throws PeaInvalidSyntaxQueryException, IOException, PeaUnsupportedOperationException {
         if (query.isEmpty()) throw new PeaInvalidSyntaxQueryException("Query should not be either null or empty");
         if (!query.toUpperCase().startsWith("ALTER"))
             throw new PeaInvalidSyntaxQueryException("Query should starts with the ALTER SQL keyword");
@@ -355,7 +361,7 @@ public class PeaClient {
         if (retrieveTableSchema) {
             String[] query_words = query.split(" ");
             String[] names = query_words[2].split("/");
-            //tb_schema = retrieveTableSchema(names[1], names[0]);
+            tb_schema = retrieveTableSchema(names[1], names[0]);
         }
 
         return new PeaAlterResponse(sqlState.equals("00000"), sqlMessage, sqlState, tb_schema);
