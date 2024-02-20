@@ -37,7 +37,7 @@ Add this dependency to your project's POM:
 
 You'll need to manually install the following JARs:
 
-- [The Stripe JAR]()
+- [The Peasys JAR]()
 - [Jackson.core] from <>.
 - [Jackson.databind] from <>.
 
