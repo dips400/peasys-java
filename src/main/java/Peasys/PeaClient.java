@@ -9,6 +9,9 @@ import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.Socket;
 import java.net.URL;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.regex.Matcher;
@@ -21,7 +24,6 @@ public class PeaClient {
 
     private final InputStream inputStream;
     private final OutputStream outputStream;
-    private final String END_PACK = "dipsjbiemg";
     public String licenseKey;
     public String partitionName;
     public boolean retrieveStatistics;
@@ -29,6 +31,8 @@ public class PeaClient {
     public int port;
     public String connexionMessage;
     public int connectionStatus;
+    private final String END_PACK = "dipsjbiemg";
+    private final String API_URL = "https://dips400.com";
 
     /**
      * Initialize a new instance of the PeaClient class. Initiates a connexion with the AS/400 server.
@@ -58,7 +62,7 @@ public class PeaClient {
         this.retrieveStatistics = retrieveStatistics;
 
         try {
-            String url = String.format("http://localhost:8080/api/license-key/retrieve-token/%s/%s", partitionName, licenseKey);
+            String url = String.format(API_URL + "/api/license-key/retrieve-token/%s/%s", partitionName, licenseKey);
             URL obj = new URL(url);
             HttpURLConnection connection = (HttpURLConnection) obj.openConnection();
 
@@ -91,6 +95,11 @@ public class PeaClient {
 
         switch (connectionStatus) {
             case 1:
+                try {
+                    sendStatistics("{\"Name\": \"" + userName + "\", \"Key\" : \"" + licenseKey + "\"}");
+                } catch (Exception e){
+                    break;
+                }
                 connexionMessage = "Connected";
                 break;
             case 2:
@@ -118,7 +127,7 @@ public class PeaClient {
      * @throws PeaInvalidSyntaxQueryException Thrown if the query syntax is invalid.
      * @throws IOException                    Thrown if the connexion is lost when sending this query.
      */
-    public PeaSelectResponse executeSelect(String query) throws PeaInvalidSyntaxQueryException, IOException {
+    public PeaSelectResponse executeSelect(String query) throws PeaInvalidSyntaxQueryException, IOException, PeaQueryException {
 
         // check query null, empty and not starting with SELECT
         if (query.isEmpty()) throw new PeaInvalidSyntaxQueryException("Query should not be either null or empty");
@@ -132,9 +141,7 @@ public class PeaClient {
         ArrayList<String> listName = new ArrayList<>(), listType = new ArrayList<>(), listPrec = new ArrayList<>(), listScale = new ArrayList<>();
         try {
             ObjectMapper mapper = new ObjectMapper();
-            System.out.println(header);
-            ArrayList<Map<String, Object>> decodedData = mapper.readValue(header, new TypeReference<>() {
-            });
+            ArrayList<Map<String, Object>> decodedData = mapper.readValue(header, new TypeReference<>() {});
             for (Map<String, Object> field : decodedData) {
                 for (String key : field.keySet()) {
                     switch (key) {
@@ -181,7 +188,10 @@ public class PeaClient {
 
         // send statistics if wanted
         if (retrieveStatistics) {
-
+            sendStatistics("{\"Name\": \"data_in\", \"Bytes\":\""+ query.getBytes().length +"\", \"Key\": \"" + licenseKey + "\"}");
+            sendStatistics("{\"Name\": \"data_out\", \"Bytes\": \"" + data.getBytes().length + "\", \"Key\": \"" + licenseKey + "\"}");
+            sendStatistics("{\"Name\": \"log\", \"UserName\" : \"" + userName + "\", " + "\"Query\": \"" + query.split(" ")[0]+ "\", " +
+                    "\"SqlCode\": \"" + returnedSQLState + "\", \"SqlMessage\": \"" + returnedSQLMessage + "\", \"Key\": \"" + licenseKey + "\"}");
         }
 
         int nb_row = data.length() / sum_precision;
@@ -239,20 +249,23 @@ public class PeaClient {
      * @throws PeaInvalidSyntaxQueryException Thrown if the query syntax is invalid.
      * @throws IOException                    Thrown if the connexion is lost when sending this query.
      */
-    public PeaUpdateResponse executeUpdate(String query) throws PeaInvalidSyntaxQueryException, IOException {
+    public PeaUpdateResponse executeUpdate(String query) throws PeaQueryException, IOException {
         if (query.isEmpty()) throw new PeaInvalidSyntaxQueryException("Query should not be either null or empty");
         if (!query.toUpperCase().startsWith("UPDATE"))
             throw new PeaInvalidSyntaxQueryException("Query should starts with the UPDATE SQL keyword");
 
         String header = retrieveData("updt" + query + END_PACK);
+        String sqlState = header.substring(1, 5);
+        String sqlMessage = header.substring(6).trim();
 
         // send statistics if wanted
         if (retrieveStatistics) {
-
+            sendStatistics("{\"Name\": \"data_in\", \"Bytes\":\""+ query.getBytes().length +"\", \"Key\": \"" + licenseKey + "\"}");
+            sendStatistics("{\"Name\": \"data_out\", \"Bytes\": \"" + header.getBytes().length + "\", \"Key\": \"" + licenseKey + "\"}");
+            sendStatistics("{\"Name\": \"log\", \"UserName\" : \"" + userName + "\", " + "\"Query\": \"" + query.split(" ")[0]+ "\", " +
+                    "\"SqlCode\": \"" + sqlState + "\", \"SqlMessage\": \"" + sqlMessage + "\", \"Key\": \"" + licenseKey + "\"}");
         }
 
-        String sqlState = header.substring(1, 5);
-        String sqlMessage = header.substring(6).trim();
         int rowCount = sqlState.equals("00000") ? Integer.parseInt(sqlMessage.substring(0, 1)) : 0;
         boolean hasSucceeded = sqlState.equals("00000") || sqlState.equals("01504");
 
@@ -268,20 +281,23 @@ public class PeaClient {
      * @throws IOException                    Thrown if the connexion is lost when sending this query.
      * @throws PeaUnsupportedOperationException Thrown if the query is used to create something else than a table, an index or a database.
      */
-    public PeaCreateResponse executeCreate(String query) throws IOException, PeaInvalidSyntaxQueryException, PeaUnsupportedOperationException {
+    public PeaCreateResponse executeCreate(String query) throws IOException, PeaQueryException {
         if (query.isEmpty()) throw new PeaInvalidSyntaxQueryException("Query should not be either null or empty");
         if (!query.toUpperCase().startsWith("CREATE"))
             throw new PeaInvalidSyntaxQueryException("Query should starts with the CREATE SQL keyword");
 
         String header = retrieveData("updt" + query + END_PACK);
 
-        // send statistics if wanted
-        if (retrieveStatistics) {
-
-        }
-
         String sqlState = header.substring(1, 5);
         String sqlMessage = header.substring(6).trim();
+
+        // send statistics if wanted
+        if (retrieveStatistics) {
+            sendStatistics("{\"Name\": \"data_in\", \"Bytes\":\""+ query.getBytes().length +"\", \"Key\": \"" + licenseKey + "\"}");
+            sendStatistics("{\"Name\": \"data_out\", \"Bytes\": \"" + header.getBytes().length + "\", \"Key\": \"" + licenseKey + "\"}");
+            sendStatistics("{\"Name\": \"log\", \"UserName\" : \"" + userName + "\", " + "\"Query\": \"" + query.split(" ")[0]+ "\", " +
+                    "\"SqlCode\": \"" + sqlState + "\", \"SqlMessage\": \"" + sqlMessage + "\", \"Key\": \"" + licenseKey + "\"}");
+        }
 
         String[] query_words = query.split(" ");
 
@@ -312,20 +328,23 @@ public class PeaClient {
      * @throws PeaInvalidSyntaxQueryException Thrown if the query syntax is invalid.
      * @throws IOException                    Thrown if the connexion is lost when sending this query.
      */
-    public PeaDeleteResponse executeDelete(String query) throws PeaInvalidSyntaxQueryException, IOException {
+    public PeaDeleteResponse executeDelete(String query) throws PeaQueryException, IOException {
         if (query.isEmpty()) throw new PeaInvalidSyntaxQueryException("Query should not be either null or empty");
         if (!query.toUpperCase().startsWith("DELETE"))
             throw new PeaInvalidSyntaxQueryException("Query should starts with the DELETE SQL keyword");
 
         String header = retrieveData("updt" + query + END_PACK);
 
-        // send statistics if wanted
-        if (retrieveStatistics) {
-
-        }
-
         String sqlState = header.substring(1, 5);
         String sqlMessage = header.substring(6).trim();
+
+        // send statistics if wanted
+        if (retrieveStatistics) {
+            sendStatistics("{\"Name\": \"data_in\", \"Bytes\":\""+ query.getBytes().length +"\", \"Key\": \"" + licenseKey + "\"}");
+            sendStatistics("{\"Name\": \"data_out\", \"Bytes\": \"" + header.getBytes().length + "\", \"Key\": \"" + licenseKey + "\"}");
+            sendStatistics("{\"Name\": \"log\", \"UserName\" : \"" + userName + "\", " + "\"Query\": \"" + query.split(" ")[0]+ "\", " +
+                    "\"SqlCode\": \"" + sqlState + "\", \"SqlMessage\": \"" + sqlMessage + "\", \"Key\": \"" + licenseKey + "\"}");
+        }
         int rowCount = sqlState.equals("00000") ? Integer.parseInt(sqlMessage.substring(0, 1)) : 0;
 
         return new PeaDeleteResponse(sqlState.equals("00000"), sqlMessage, sqlState, rowCount);
@@ -341,20 +360,23 @@ public class PeaClient {
      * @throws IOException                    Thrown if the connexion is lost when sending this query.
      * @throws PeaUnsupportedOperationException Thrown when retrieving the table schema.
      */
-    public PeaAlterResponse executeAlter(String query, boolean retrieveTableSchema) throws PeaInvalidSyntaxQueryException, IOException, PeaUnsupportedOperationException {
+    public PeaAlterResponse executeAlter(String query, boolean retrieveTableSchema) throws PeaQueryException, IOException {
         if (query.isEmpty()) throw new PeaInvalidSyntaxQueryException("Query should not be either null or empty");
         if (!query.toUpperCase().startsWith("ALTER"))
             throw new PeaInvalidSyntaxQueryException("Query should starts with the ALTER SQL keyword");
 
         String header = retrieveData("updt" + query + END_PACK);
 
-        // send statistics if wanted
-        if (retrieveStatistics) {
-
-        }
-
         String sqlState = header.substring(1, 5);
         String sqlMessage = header.substring(6).trim();
+
+        // send statistics if wanted
+        if (retrieveStatistics) {
+            sendStatistics("{\"Name\": \"data_in\", \"Bytes\":\""+ query.getBytes().length +"\", \"Key\": \"" + licenseKey + "\"}");
+            sendStatistics("{\"Name\": \"data_out\", \"Bytes\": \"" + header.getBytes().length + "\", \"Key\": \"" + licenseKey + "\"}");
+            sendStatistics("{\"Name\": \"log\", \"UserName\" : \"" + userName + "\", " + "\"Query\": \"" + query.split(" ")[0]+ "\", " +
+                    "\"SqlCode\": \"" + sqlState + "\", \"SqlMessage\": \"" + sqlMessage + "\", \"Key\": \"" + licenseKey + "\"}");
+        }
 
         // retrieve table schema if wanted
         Dictionary<String, ColumnInfo> tb_schema = null;
@@ -375,20 +397,23 @@ public class PeaClient {
      * @throws PeaInvalidSyntaxQueryException Thrown if the query syntax is invalid.
      * @throws IOException                    Thrown if the connexion is lost when sending this query.
      */
-    public PeaDropResponse executeDrop(String query) throws PeaInvalidSyntaxQueryException, IOException {
+    public PeaDropResponse executeDrop(String query) throws PeaQueryException, IOException {
         if (query.isEmpty()) throw new PeaInvalidSyntaxQueryException("Query should not be either null or empty");
         if (!query.toUpperCase().startsWith("DROP"))
             throw new PeaInvalidSyntaxQueryException("Query should starts with the DROP SQL keyword");
 
         String header = retrieveData("updt" + query + END_PACK);
 
-        // send statistics if wanted
-        if (retrieveStatistics) {
-
-        }
-
         String sqlState = header.substring(1, 5);
         String sqlMessage = header.substring(6).trim();
+
+        // send statistics if wanted
+        if (retrieveStatistics) {
+            sendStatistics("{\"Name\": \"data_in\", \"Bytes\":\""+ query.getBytes().length +"\", \"Key\": \"" + licenseKey + "\"}");
+            sendStatistics("{\"Name\": \"data_out\", \"Bytes\": \"" + header.getBytes().length + "\", \"Key\": \"" + licenseKey + "\"}");
+            sendStatistics("{\"Name\": \"log\", \"UserName\" : \"" + userName + "\", " + "\"Query\": \"" + query.split(" ")[0]+ "\", " +
+                    "\"SqlCode\": \"" + sqlState + "\", \"SqlMessage\": \"" + sqlMessage + "\", \"Key\": \"" + licenseKey + "\"}");
+        }
 
         return new PeaDropResponse(sqlState.equals("00000"), sqlMessage, sqlState);
     }
@@ -401,7 +426,7 @@ public class PeaClient {
      * @throws PeaInvalidSyntaxQueryException Thrown if the query syntax is invalid.
      * @throws IOException                    Thrown if the connexion is lost when sending this query.
      */
-    public PeaInsertResponse executeInsert(String query) throws PeaInvalidSyntaxQueryException, IOException {
+    public PeaInsertResponse executeInsert(String query) throws PeaQueryException, IOException {
         // check query null, empty and not starting with INSERT
         if (query.isEmpty()) throw new PeaInvalidSyntaxQueryException("Query should not be either null or empty");
         if (!query.toUpperCase().startsWith("INSERT"))
@@ -409,13 +434,17 @@ public class PeaClient {
 
         String header = retrieveData("updt" + query + END_PACK);
 
-        // send statistics if wanted
-        if (retrieveStatistics) {
-
-        }
-
         String sqlState = header.substring(1, 5);
         String sqlMessage = header.substring(6).trim();
+
+        // send statistics if wanted
+        if (retrieveStatistics) {
+            sendStatistics("{\"Name\": \"data_in\", \"Bytes\":\""+ query.getBytes().length +"\", \"Key\": \"" + licenseKey + "\"}");
+            sendStatistics("{\"Name\": \"data_out\", \"Bytes\": \"" + header.getBytes().length + "\", \"Key\": \"" + licenseKey + "\"}");
+            sendStatistics("{\"Name\": \"log\", \"UserName\" : \"" + userName + "\", " + "\"Query\": \"" + query.split(" ")[0]+ "\", " +
+                    "\"SqlCode\": \"" + sqlState + "\", \"SqlMessage\": \"" + sqlMessage + "\", \"Key\": \"" + licenseKey + "\"}");
+        }
+
         int rowCount = sqlState.equals("00000") ? Integer.parseInt(sqlMessage.substring(0, 1)) : 0;
 
         return new PeaInsertResponse(sqlState.equals("00000"), sqlState, sqlMessage, rowCount);
@@ -428,17 +457,20 @@ public class PeaClient {
      * @return An instance of the PeaResponse object.
      * @throws IOException Thrown if the connexion is lost when sending this query.
      */
-    public PeaResponse execute(String query) throws IOException {
+    public PeaResponse execute(String query) throws IOException, PeaQueryException {
 
         String header = retrieveData("updt" + query + END_PACK);
 
-        // send statistics if wanted
-           if (retrieveStatistics) {
-
-            }
-
         String sqlState = header.substring(1, 5);
         String sqlMessage = header.substring(6).trim();
+
+        // send statistics if wanted
+        if (retrieveStatistics) {
+            sendStatistics("{\"Name\": \"data_in\", \"Bytes\":\""+ query.getBytes().length +"\", \"Key\": \"" + licenseKey + "\"}");
+            sendStatistics("{\"Name\": \"data_out\", \"Bytes\": \"" + header.getBytes().length + "\", \"Key\": \"" + licenseKey + "\"}");
+            sendStatistics("{\"Name\": \"log\", \"UserName\" : \"" + userName + "\", " + "\"Query\": \"" + query.split(" ")[0]+ "\", " +
+                    "\"SqlCode\": \"" + sqlState + "\", \"SqlMessage\": \"" + sqlMessage + "\", \"Key\": \"" + licenseKey + "\"}");
+        }
 
         return new PeaResponse(sqlState.equals("00000"), sqlState, sqlMessage);
     }
@@ -615,6 +647,24 @@ public class PeaClient {
         }
 
         return tb_name;
+    }
+
+    private void sendStatistics(String data) throws PeaQueryException {
+        try {
+            URL obj = new URL(API_URL + "/api/license-key/update");
+            HttpRequest req = HttpRequest.newBuilder(obj.toURI())
+                    .header("Content-Type", "application/json")
+                    .method("PATCH", HttpRequest.BodyPublishers.ofString(data))
+                    .build();
+
+            HttpResponse<String> response = HttpClient.newHttpClient()
+                    .send(req, HttpResponse.BodyHandlers.ofString());
+            response.body();
+
+        } catch (Exception exception) {
+            throw new PeaQueryException("Currently impossible to send statistics to the server. You can " +
+                    "temporarily disable it to continue to use Peasys.", exception);
+        }
     }
 
     private Map<String, String> readData(InputStream stream) throws IOException {
