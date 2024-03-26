@@ -22,30 +22,33 @@ import java.util.regex.Pattern;
  */
 public class PeaClient {
 
+    private static final String END_PACK = "dipsjbiemg";
+    private static final String API_URL = "http://localhost:8080";
+    public final String idClient;
+    public final boolean onlineVersion;
+    public final String partitionName;
+    public final String userName;
+    public final int port;
     private final InputStream inputStream;
     private final OutputStream outputStream;
-    public String licenseKey;
-    public String partitionName;
     public boolean retrieveStatistics;
-    public String userName;
-    public int port;
     public String connexionMessage;
     public int connectionStatus;
-    private final String END_PACK = "dipsjbiemg";
-    private final String API_URL = "https://dips400.com";
 
     /**
      * Initialize a new instance of the PeaClient class. Initiates a connexion with the AS/400 server.
-     * @param partitionName DNS name (name of the partition) of the remote AS/400 server.
-     * @param port Port used for the data exchange between the client and the server.
-     * @param userName Username of the AS/400 profile used for connexion.
-     * @param password Password of the AS/400 profile used for connexion.
-     * @param licenseKey License key delivered by DIPS after subscription.
+     *
+     * @param partitionName      DNS name (name of the partition) of the remote AS/400 server.
+     * @param port               Port used for the data exchange between the client and the server.
+     * @param userName           Username of the AS/400 profile used for connexion.
+     * @param password           Password of the AS/400 profile used for connexion.
+     * @param idClient           ID of the client on the DIPS website.
+     * @param onlineVersion      Set to true if you want to use the online version of Peasys (<a href="https://dips400.com/docs/connexion">more information</a>).
      * @param retrieveStatistics Set to true if you want the statistics of the license key use to be collect.
      * @throws PeaConnexionException Exception thrown when the client was not able to successfully connect to the server.
      */
-    public PeaClient(String partitionName, int port, String userName, String password, String licenseKey, boolean retrieveStatistics) throws PeaConnexionException {
-        if (partitionName.isEmpty() || userName.isEmpty() || password.isEmpty() || licenseKey.isEmpty()) {
+    public PeaClient(String partitionName, int port, String userName, String password, String idClient, boolean onlineVersion, boolean retrieveStatistics) throws PeaConnexionException {
+        if (partitionName.isEmpty() || userName.isEmpty() || password.isEmpty() || idClient.isEmpty()) {
             throw new PeaInvalidCredentialsException("Parameters of the PeaClient should not be either null or empty");
         }
 
@@ -58,19 +61,25 @@ public class PeaClient {
         this.partitionName = partitionName;
         this.port = port;
         this.userName = userName;
-        this.licenseKey = licenseKey;
+        this.idClient = idClient;
+        this.onlineVersion = onlineVersion;
         this.retrieveStatistics = retrieveStatistics;
 
-        try {
-            String url = String.format(API_URL + "/api/license-key/retrieve-token/%s/%s", partitionName, licenseKey);
-            URL obj = new URL(url);
-            HttpURLConnection connection = (HttpURLConnection) obj.openConnection();
+        String token = "pldgchjtsxlqyfucjstpldgchjcjstemzplfpldgchjtsxlqyfucjstemzplfutysnchqternoutysnchqternoemzplfutysnchqterno";
+        if (onlineVersion) {
+            try {
+                String url = String.format(API_URL + "/api/license-key/retrieve-token/%s/%s", partitionName, idClient);
+                URL obj = new URL(url);
+                HttpURLConnection connection = (HttpURLConnection) obj.openConnection();
 
-            Map<String, String> response = readData(connection.getInputStream());
+                Map<String, String> response = readData(connection.getInputStream());
 
-            System.out.println("Response: " + response);
-        } catch (Exception exception) {
-            throw new PeaInvalidLicenseKeyException("The license key that you provided is not valid");
+                // TODO : retrieve token
+                System.out.println("Response: " + response);
+            } catch (Exception exception) {
+                System.out.println(exception);
+                throw new PeaInvalidLicenseKeyException("The license key that you provided is not valid");
+            }
         }
 
         try {
@@ -81,8 +90,8 @@ public class PeaClient {
             throw new PeaConnexionException("Error connecting the TCP client", ex);
         }
 
-        String login = userName + " ".repeat(10 - userName.length()) + password +
-                " ".repeat(10 - password.length());
+        // String login = userName + " ".repeat(10 - userName.length()) + token + " ".repeat(100 - password.length()) + password;
+        String login = userName + " ".repeat(10 - userName.length()) + password + " ".repeat(10 - password.length());
 
         try {
             outputStream.write(login.getBytes(StandardCharsets.UTF_8));
@@ -96,8 +105,8 @@ public class PeaClient {
         switch (connectionStatus) {
             case 1:
                 try {
-                    sendStatistics("{\"Name\": \"" + userName + "\", \"Key\" : \"" + licenseKey + "\"}");
-                } catch (Exception e){
+                    sendStatistics("{\"Name\": \"" + userName + "\", \"IdClient\" : \"" + idClient + "\", \"PartitionName\" : \"" + partitionName + "\"}");
+                } catch (Exception e) {
                     break;
                 }
                 connexionMessage = "Connected";
@@ -141,7 +150,8 @@ public class PeaClient {
         ArrayList<String> listName = new ArrayList<>(), listType = new ArrayList<>(), listPrec = new ArrayList<>(), listScale = new ArrayList<>();
         try {
             ObjectMapper mapper = new ObjectMapper();
-            ArrayList<Map<String, Object>> decodedData = mapper.readValue(header, new TypeReference<>() {});
+            ArrayList<Map<String, Object>> decodedData = mapper.readValue(header, new TypeReference<>() {
+            });
             for (Map<String, Object> field : decodedData) {
                 for (String key : field.keySet()) {
                     switch (key) {
@@ -188,10 +198,10 @@ public class PeaClient {
 
         // send statistics if wanted
         if (retrieveStatistics) {
-            sendStatistics("{\"Name\": \"data_in\", \"Bytes\":\""+ query.getBytes().length +"\", \"Key\": \"" + licenseKey + "\"}");
-            sendStatistics("{\"Name\": \"data_out\", \"Bytes\": \"" + data.getBytes().length + "\", \"Key\": \"" + licenseKey + "\"}");
-            sendStatistics("{\"Name\": \"log\", \"UserName\" : \"" + userName + "\", " + "\"Query\": \"" + query.split(" ")[0]+ "\", " +
-                    "\"SqlCode\": \"" + returnedSQLState + "\", \"SqlMessage\": \"" + returnedSQLMessage + "\", \"Key\": \"" + licenseKey + "\"}");
+            sendStatistics("{\"Name\": \"data_in\", \"Bytes\":\"" + query.getBytes().length + "\", \"IdClient\" : \"" + idClient + "\", \"PartitionName\" : \"" + partitionName + "\"}");
+            sendStatistics("{\"Name\": \"data_out\", \"Bytes\": \"" + data.getBytes().length + "\", \"IdClient\" : \"" + idClient + "\", \"PartitionName\" : \"" + partitionName + "\"}");
+            sendStatistics("{\"Name\": \"log\", \"UserName\" : \"" + userName + "\", " + "\"Query\": \"" + query.split(" ")[0] + "\", " +
+                    "\"SqlCode\": \"" + returnedSQLState + "\", \"SqlMessage\": \"" + returnedSQLMessage + "\", \"IdClient\" : \"" + idClient + "\", \"PartitionName\" : \"" + partitionName + "\"}");
         }
 
         int nb_row = data.length() / sum_precision;
@@ -260,10 +270,10 @@ public class PeaClient {
 
         // send statistics if wanted
         if (retrieveStatistics) {
-            sendStatistics("{\"Name\": \"data_in\", \"Bytes\":\""+ query.getBytes().length +"\", \"Key\": \"" + licenseKey + "\"}");
-            sendStatistics("{\"Name\": \"data_out\", \"Bytes\": \"" + header.getBytes().length + "\", \"Key\": \"" + licenseKey + "\"}");
-            sendStatistics("{\"Name\": \"log\", \"UserName\" : \"" + userName + "\", " + "\"Query\": \"" + query.split(" ")[0]+ "\", " +
-                    "\"SqlCode\": \"" + sqlState + "\", \"SqlMessage\": \"" + sqlMessage + "\", \"Key\": \"" + licenseKey + "\"}");
+            sendStatistics("{\"Name\": \"data_in\", \"Bytes\":\"" + query.getBytes().length + "\", \"IdClient\" : \"" + idClient + "\", \"PartitionName\" : \"" + partitionName + "\"}");
+            sendStatistics("{\"Name\": \"data_out\", \"Bytes\": \"" + header.getBytes().length + "\", \"IdClient\" : \"" + idClient + "\", \"PartitionName\" : \"" + partitionName + "\"}");
+            sendStatistics("{\"Name\": \"log\", \"UserName\" : \"" + userName + "\", " + "\"Query\": \"" + query.split(" ")[0] + "\", " +
+                    "\"SqlCode\": \"" + sqlState + "\", \"SqlMessage\": \"" + sqlMessage + "\", \"IdClient\" : \"" + idClient + "\", \"PartitionName\" : \"" + partitionName + "\"}");
         }
 
         int rowCount = sqlState.equals("00000") ? Integer.parseInt(sqlMessage.substring(0, 1)) : 0;
@@ -277,8 +287,8 @@ public class PeaClient {
      *
      * @param query SQL query that should start with the CREATE keyword.
      * @return An instance of the PeaCreateResponse object.
-     * @throws PeaInvalidSyntaxQueryException Thrown if the query syntax is invalid.
-     * @throws IOException                    Thrown if the connexion is lost when sending this query.
+     * @throws PeaInvalidSyntaxQueryException   Thrown if the query syntax is invalid.
+     * @throws IOException                      Thrown if the connexion is lost when sending this query.
      * @throws PeaUnsupportedOperationException Thrown if the query is used to create something else than a table, an index or a database.
      */
     public PeaCreateResponse executeCreate(String query) throws IOException, PeaQueryException {
@@ -293,10 +303,10 @@ public class PeaClient {
 
         // send statistics if wanted
         if (retrieveStatistics) {
-            sendStatistics("{\"Name\": \"data_in\", \"Bytes\":\""+ query.getBytes().length +"\", \"Key\": \"" + licenseKey + "\"}");
-            sendStatistics("{\"Name\": \"data_out\", \"Bytes\": \"" + header.getBytes().length + "\", \"Key\": \"" + licenseKey + "\"}");
-            sendStatistics("{\"Name\": \"log\", \"UserName\" : \"" + userName + "\", " + "\"Query\": \"" + query.split(" ")[0]+ "\", " +
-                    "\"SqlCode\": \"" + sqlState + "\", \"SqlMessage\": \"" + sqlMessage + "\", \"Key\": \"" + licenseKey + "\"}");
+            sendStatistics("{\"Name\": \"data_in\", \"Bytes\":\"" + query.getBytes().length + "\", \"IdClient\" : \"" + idClient + "\", \"PartitionName\" : \"" + partitionName + "\"}");
+            sendStatistics("{\"Name\": \"data_out\", \"Bytes\": \"" + header.getBytes().length + "\", \"IdClient\" : \"" + idClient + "\", \"PartitionName\" : \"" + partitionName + "\"}");
+            sendStatistics("{\"Name\": \"log\", \"UserName\" : \"" + userName + "\", " + "\"Query\": \"" + query.split(" ")[0] + "\", " +
+                    "\"SqlCode\": \"" + sqlState + "\", \"SqlMessage\": \"" + sqlMessage + "\", \"IdClient\" : \"" + idClient + "\", \"PartitionName\" : \"" + partitionName + "\"}");
         }
 
         String[] query_words = query.split(" ");
@@ -340,10 +350,10 @@ public class PeaClient {
 
         // send statistics if wanted
         if (retrieveStatistics) {
-            sendStatistics("{\"Name\": \"data_in\", \"Bytes\":\""+ query.getBytes().length +"\", \"Key\": \"" + licenseKey + "\"}");
-            sendStatistics("{\"Name\": \"data_out\", \"Bytes\": \"" + header.getBytes().length + "\", \"Key\": \"" + licenseKey + "\"}");
-            sendStatistics("{\"Name\": \"log\", \"UserName\" : \"" + userName + "\", " + "\"Query\": \"" + query.split(" ")[0]+ "\", " +
-                    "\"SqlCode\": \"" + sqlState + "\", \"SqlMessage\": \"" + sqlMessage + "\", \"Key\": \"" + licenseKey + "\"}");
+            sendStatistics("{\"Name\": \"data_in\", \"Bytes\":\"" + query.getBytes().length + "\", \"IdClient\" : \"" + idClient + "\", \"PartitionName\" : \"" + partitionName + "\"}");
+            sendStatistics("{\"Name\": \"data_out\", \"Bytes\": \"" + header.getBytes().length + "\", \"IdClient\" : \"" + idClient + "\", \"PartitionName\" : \"" + partitionName + "\"}");
+            sendStatistics("{\"Name\": \"log\", \"UserName\" : \"" + userName + "\", " + "\"Query\": \"" + query.split(" ")[0] + "\", " +
+                    "\"SqlCode\": \"" + sqlState + "\", \"SqlMessage\": \"" + sqlMessage + "\", \"IdClient\" : \"" + idClient + "\", \"PartitionName\" : \"" + partitionName + "\"}");
         }
         int rowCount = sqlState.equals("00000") ? Integer.parseInt(sqlMessage.substring(0, 1)) : 0;
 
@@ -353,11 +363,11 @@ public class PeaClient {
     /**
      * Sends the ALTER SQL query to the server that execute it and retrieve the desired data.
      *
-     * @param query SQL query that should start with the ALTER keyword.
+     * @param query               SQL query that should start with the ALTER keyword.
      * @param retrieveTableSchema Set to true if the call should return the table schema.
      * @return An instance of the PeaAlterResponse object.
-     * @throws PeaInvalidSyntaxQueryException Thrown if the query syntax is invalid.
-     * @throws IOException                    Thrown if the connexion is lost when sending this query.
+     * @throws PeaInvalidSyntaxQueryException   Thrown if the query syntax is invalid.
+     * @throws IOException                      Thrown if the connexion is lost when sending this query.
      * @throws PeaUnsupportedOperationException Thrown when retrieving the table schema.
      */
     public PeaAlterResponse executeAlter(String query, boolean retrieveTableSchema) throws PeaQueryException, IOException {
@@ -372,10 +382,10 @@ public class PeaClient {
 
         // send statistics if wanted
         if (retrieveStatistics) {
-            sendStatistics("{\"Name\": \"data_in\", \"Bytes\":\""+ query.getBytes().length +"\", \"Key\": \"" + licenseKey + "\"}");
-            sendStatistics("{\"Name\": \"data_out\", \"Bytes\": \"" + header.getBytes().length + "\", \"Key\": \"" + licenseKey + "\"}");
-            sendStatistics("{\"Name\": \"log\", \"UserName\" : \"" + userName + "\", " + "\"Query\": \"" + query.split(" ")[0]+ "\", " +
-                    "\"SqlCode\": \"" + sqlState + "\", \"SqlMessage\": \"" + sqlMessage + "\", \"Key\": \"" + licenseKey + "\"}");
+            sendStatistics("{\"Name\": \"data_in\", \"Bytes\":\"" + query.getBytes().length + "\", \"IdClient\" : \"" + idClient + "\", \"PartitionName\" : \"" + partitionName + "\"}");
+            sendStatistics("{\"Name\": \"data_out\", \"Bytes\": \"" + header.getBytes().length + "\", \"IdClient\" : \"" + idClient + "\", \"PartitionName\" : \"" + partitionName + "\"}");
+            sendStatistics("{\"Name\": \"log\", \"UserName\" : \"" + userName + "\", " + "\"Query\": \"" + query.split(" ")[0] + "\", " +
+                    "\"SqlCode\": \"" + sqlState + "\", \"SqlMessage\": \"" + sqlMessage + "\", \"IdClient\" : \"" + idClient + "\", \"PartitionName\" : \"" + partitionName + "\"}");
         }
 
         // retrieve table schema if wanted
@@ -409,10 +419,10 @@ public class PeaClient {
 
         // send statistics if wanted
         if (retrieveStatistics) {
-            sendStatistics("{\"Name\": \"data_in\", \"Bytes\":\""+ query.getBytes().length +"\", \"Key\": \"" + licenseKey + "\"}");
-            sendStatistics("{\"Name\": \"data_out\", \"Bytes\": \"" + header.getBytes().length + "\", \"Key\": \"" + licenseKey + "\"}");
-            sendStatistics("{\"Name\": \"log\", \"UserName\" : \"" + userName + "\", " + "\"Query\": \"" + query.split(" ")[0]+ "\", " +
-                    "\"SqlCode\": \"" + sqlState + "\", \"SqlMessage\": \"" + sqlMessage + "\", \"Key\": \"" + licenseKey + "\"}");
+            sendStatistics("{\"Name\": \"data_in\", \"Bytes\":\"" + query.getBytes().length + "\", \"IdClient\" : \"" + idClient + "\", \"PartitionName\" : \"" + partitionName + "\"}");
+            sendStatistics("{\"Name\": \"data_out\", \"Bytes\": \"" + header.getBytes().length + "\", \"IdClient\" : \"" + idClient + "\", \"PartitionName\" : \"" + partitionName + "\"}");
+            sendStatistics("{\"Name\": \"log\", \"UserName\" : \"" + userName + "\", " + "\"Query\": \"" + query.split(" ")[0] + "\", " +
+                    "\"SqlCode\": \"" + sqlState + "\", \"SqlMessage\": \"" + sqlMessage + "\", \"IdClient\" : \"" + idClient + "\", \"PartitionName\" : \"" + partitionName + "\"}");
         }
 
         return new PeaDropResponse(sqlState.equals("00000"), sqlMessage, sqlState);
@@ -439,10 +449,10 @@ public class PeaClient {
 
         // send statistics if wanted
         if (retrieveStatistics) {
-            sendStatistics("{\"Name\": \"data_in\", \"Bytes\":\""+ query.getBytes().length +"\", \"Key\": \"" + licenseKey + "\"}");
-            sendStatistics("{\"Name\": \"data_out\", \"Bytes\": \"" + header.getBytes().length + "\", \"Key\": \"" + licenseKey + "\"}");
-            sendStatistics("{\"Name\": \"log\", \"UserName\" : \"" + userName + "\", " + "\"Query\": \"" + query.split(" ")[0]+ "\", " +
-                    "\"SqlCode\": \"" + sqlState + "\", \"SqlMessage\": \"" + sqlMessage + "\", \"Key\": \"" + licenseKey + "\"}");
+            sendStatistics("{\"Name\": \"data_in\", \"Bytes\":\"" + query.getBytes().length + "\", \"IdClient\" : \"" + idClient + "\", \"PartitionName\" : \"" + partitionName + "\"}");
+            sendStatistics("{\"Name\": \"data_out\", \"Bytes\": \"" + header.getBytes().length + "\", \"IdClient\" : \"" + idClient + "\", \"PartitionName\" : \"" + partitionName + "\"}");
+            sendStatistics("{\"Name\": \"log\", \"UserName\" : \"" + userName + "\", " + "\"Query\": \"" + query.split(" ")[0] + "\", " +
+                    "\"SqlCode\": \"" + sqlState + "\", \"SqlMessage\": \"" + sqlMessage + "\", \"IdClient\" : \"" + idClient + "\", \"PartitionName\" : \"" + partitionName + "\"}");
         }
 
         int rowCount = sqlState.equals("00000") ? Integer.parseInt(sqlMessage.substring(0, 1)) : 0;
@@ -466,10 +476,10 @@ public class PeaClient {
 
         // send statistics if wanted
         if (retrieveStatistics) {
-            sendStatistics("{\"Name\": \"data_in\", \"Bytes\":\""+ query.getBytes().length +"\", \"Key\": \"" + licenseKey + "\"}");
-            sendStatistics("{\"Name\": \"data_out\", \"Bytes\": \"" + header.getBytes().length + "\", \"Key\": \"" + licenseKey + "\"}");
-            sendStatistics("{\"Name\": \"log\", \"UserName\" : \"" + userName + "\", " + "\"Query\": \"" + query.split(" ")[0]+ "\", " +
-                    "\"SqlCode\": \"" + sqlState + "\", \"SqlMessage\": \"" + sqlMessage + "\", \"Key\": \"" + licenseKey + "\"}");
+            sendStatistics("{\"Name\": \"data_in\", \"Bytes\":\"" + query.getBytes().length + "\", \"IdClient\" : \"" + idClient + "\", \"PartitionName\" : \"" + partitionName + "\"}");
+            sendStatistics("{\"Name\": \"data_out\", \"Bytes\": \"" + header.getBytes().length + "\", \"IdClient\" : \"" + idClient + "\", \"PartitionName\" : \"" + partitionName + "\"}");
+            sendStatistics("{\"Name\": \"log\", \"UserName\" : \"" + userName + "\", " + "\"Query\": \"" + query.split(" ")[0] + "\", " +
+                    "\"SqlCode\": \"" + sqlState + "\", \"SqlMessage\": \"" + sqlMessage + "\", \"IdClient\" : \"" + idClient + "\", \"PartitionName\" : \"" + partitionName + "\"}");
         }
 
         return new PeaResponse(sqlState.equals("00000"), sqlState, sqlMessage);
@@ -640,10 +650,10 @@ public class PeaClient {
         }
 
         Hashtable<String, ColumnInfo> tb_name = new Hashtable<>();
-        for(List<String> list : result.values()) {
+        for (List<String> list : result.values()) {
             tb_name.put(list.get(0), new ColumnInfo(list.get(0), Integer.parseInt(list.get(1)), list.get(2),
-                    Integer.parseInt(list.get(3)),Integer.parseInt(list.get(4)), list.get(5), list.get(6),
-                            list.get(7), Integer.parseInt(list.get(8))));
+                    Integer.parseInt(list.get(3)), Integer.parseInt(list.get(4)), list.get(5), list.get(6),
+                    list.get(7), Integer.parseInt(list.get(8))));
         }
 
         return tb_name;
