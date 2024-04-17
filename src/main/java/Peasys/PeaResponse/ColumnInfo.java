@@ -23,11 +23,10 @@ public final class ColumnInfo {
      * @param numericScale Scale of the data contain in the column if numeric type.
      * @param isNullable Y/N depending on the updatability of the field.
      * @param isUpdatable Y/N depending on the nullability of the field.
-     * @param longComment Description of the column, maybe be empty.
      * @param numericPrecision Precision of the data contain in the column if numeric type.
      */
     public ColumnInfo(String columnName, int ordinalPosition, String dataType, int length, int numericScale, String isNullable,
-                      String isUpdatable, String longComment, int numericPrecision) {
+                      String isUpdatable, int numericPrecision) {
         this.columnName = columnName;
         this.ordinalPosition = ordinalPosition;
         this.dataType = dataType;
@@ -35,7 +34,6 @@ public final class ColumnInfo {
         this.numericScale = numericScale;
         this.isNullable = isNullable;
         this.isUpdatable = isUpdatable;
-        this.longComment = longComment;
         this.numericPrecision = numericPrecision;
     }
 }

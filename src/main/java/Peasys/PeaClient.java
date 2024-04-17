@@ -188,11 +188,6 @@ public class PeaClient {
             sum_precision += Integer.parseInt(listPrec.get(j));
         }
 
-        Hashtable<String, List<String>> result = new Hashtable<>();
-        for (int c = 0; c < nb_col; c++) {
-            result.put(colname[c], new ArrayList<>());
-        }
-
         // send the second command to retrieve the data
         String data = retrieveData("getd" + query + END_PACK);
 
@@ -205,47 +200,8 @@ public class PeaClient {
         }
 
         int nb_row = data.length() / sum_precision;
-        int pointer = 0;
-        while (!(pointer == data.length())) {
-            for (int m = 0; m < nb_col; m++) {
-                int scale = Integer.parseInt(listScale.get(m));
-                int precision = Integer.parseInt(listPrec.get(m));
-                int type = Integer.parseInt(listType.get(m));
 
-                // numeric packed
-                if ((type == 484 && scale != 0) || (type == 485 && scale != 0) || (type == 488 && scale != 0) || (type == 489 && scale != 0)) {
-                    double temp_float_data = Double.parseDouble(data.substring(pointer, pointer + precision)) / Math.pow(10, scale);
-                    pointer += precision;
-                    result.get(colname[m]).add(Double.toString(temp_float_data));
-                }
-                // long
-                else if (type == 492 || type == 493) {
-                    result.get(colname[m]).add(data.substring(pointer, pointer + 20));
-                    pointer += 20;
-                }
-                // int
-                else if (type == 496 || type == 497) {
-                    result.get(colname[m]).add(data.substring(pointer, pointer + 10));
-                    pointer += 10;
-                }
-                // short
-                else if (type == 500 || type == 501) {
-                    result.get(colname[m]).add(data.substring(pointer, pointer + 5));
-                    pointer += 5;
-                }
-                // String, date, time, timestamp
-                else {
-                    if (type == 389) {
-                        result.get(colname[m]).add(data.substring(pointer, pointer + precision));
-                    } else if (type == 385) {
-                        result.get(colname[m]).add(data.substring(pointer, pointer + precision));
-                    } else {
-                        result.get(colname[m]).add(data.substring(pointer, pointer + precision));
-                    }
-                    pointer += precision;
-                }
-            }
-        }
+        Hashtable<String, List<String>> result = buildResultSet(data, colname, nb_col, listScale, listPrec, listType);
 
         // retrieve data and create the PeaSelectResponse object to return
         return new PeaSelectResponse(returnedSQLState.equals("00000"), returnedSQLMessage, returnedSQLState, result, nb_row, colname);
@@ -315,7 +271,66 @@ public class PeaClient {
         Dictionary<String, ColumnInfo> tb_schema = null;
         if (query_words[1].equalsIgnoreCase("TABLE")) {
             String[] names = query_words[2].split("/");
-            tb_schema = retrieveTableSchema(names[1], names[0]);
+
+            String tb_query = "SELECT COLUMN_NAME, ORDINAL_POSITION, DATA_TYPE, LENGTH, NUMERIC_SCALE, IS_NULLABLE, IS_UPDATABLE, NUMERIC_PRECISION FROM QSYS2.SYSCOLUMNS WHERE SYSTEM_TABLE_NAME = '" + names[1].toUpperCase() + "' AND SYSTEM_TABLE_SCHEMA = '" + names[0].toUpperCase() + "'";
+            String tb_header = retrieveData("geth" + tb_query + END_PACK);
+
+            ArrayList<String> listName = new ArrayList<>(), listType = new ArrayList<>(), listPrec = new ArrayList<>(), listScale = new ArrayList<>();
+            try {
+                ObjectMapper mapper = new ObjectMapper();
+                ArrayList<Map<String, Object>> decodedData = mapper.readValue(tb_header, new TypeReference<>() {
+                });
+                for (Map<String, Object> field : decodedData) {
+                    for (String key : field.keySet()) {
+                        switch (key) {
+                            case "name":
+                                listName.add(field.get(key).toString());
+                                break;
+                            case "type":
+                                listType.add(field.get(key).toString());
+                                break;
+                            case "prec":
+                                listPrec.add(field.get(key).toString());
+                                break;
+                            case "scal":
+                                listScale.add(field.get(key).toString());
+                                break;
+                            default:
+                                throw new PeaQueryException();
+                        }
+                    }
+                }
+            } catch (Exception ex) {
+                sqlState = header.substring(1, 6);
+                sqlMessage = header.substring(6);
+                return new PeaCreateResponse(false, sqlMessage, sqlState, "", "", null);
+            }
+
+            int nb_col = listPrec.size();
+            String[] colname = new String[nb_col];
+
+            int sum_precision = 0;
+            for (int j = 0; j < nb_col; j++) {
+                colname[j] = listName.get(j).trim().toLowerCase();
+                sum_precision += Integer.parseInt(listPrec.get(j));
+            }
+
+            // send the second command to retrieve the data
+            String data = retrieveData("getd" + tb_query + END_PACK);
+
+            int nb_row = data.length() / sum_precision;
+            Hashtable<String, List<String>> result = buildResultSet(data, colname, nb_col, listScale, listPrec, listType);
+
+            for (int i = 0; i < nb_row; i++) {
+                tb_schema.put(
+                        result.get("column_name").get(i),
+                        new ColumnInfo(
+                                result.get("column_name").get(i), Integer.parseInt(result.get("ordinal_position").get(i)), result.get("data_type").get(i),
+                                Integer.parseInt(result.get("length").get(i)), Integer.parseInt(result.get("numeric_scale").get(i)), result.get("is_nullable").get(i),
+                                result.get("is_updatable").get(i), Integer.parseInt(result.get("numeric_precision").get(i))
+                        )
+                );
+            }
         }
 
         switch (query_words[1].toUpperCase()) {
@@ -389,11 +404,70 @@ public class PeaClient {
         }
 
         // retrieve table schema if wanted
-        Dictionary<String, ColumnInfo> tb_schema = null;
+        Dictionary<String, ColumnInfo> tb_schema = new Hashtable<>();
         if (retrieveTableSchema) {
             String[] query_words = query.split(" ");
             String[] names = query_words[2].split("/");
-            tb_schema = retrieveTableSchema(names[1], names[0]);
+
+            String tb_query = "SELECT COLUMN_NAME, ORDINAL_POSITION, DATA_TYPE, LENGTH, NUMERIC_SCALE, IS_NULLABLE, IS_UPDATABLE, NUMERIC_PRECISION FROM QSYS2.SYSCOLUMNS WHERE SYSTEM_TABLE_NAME = '" + names[1].toUpperCase() + "' AND SYSTEM_TABLE_SCHEMA = '" + names[0].toUpperCase() + "'";
+            String tb_header = retrieveData("geth" + tb_query + END_PACK);
+
+            ArrayList<String> listName = new ArrayList<>(), listType = new ArrayList<>(), listPrec = new ArrayList<>(), listScale = new ArrayList<>();
+            try {
+                ObjectMapper mapper = new ObjectMapper();
+                ArrayList<Map<String, Object>> decodedData = mapper.readValue(tb_header, new TypeReference<>() {
+                });
+                for (Map<String, Object> field : decodedData) {
+                    for (String key : field.keySet()) {
+                        switch (key) {
+                            case "name":
+                                listName.add(field.get(key).toString());
+                                break;
+                            case "type":
+                                listType.add(field.get(key).toString());
+                                break;
+                            case "prec":
+                                listPrec.add(field.get(key).toString());
+                                break;
+                            case "scal":
+                                listScale.add(field.get(key).toString());
+                                break;
+                            default:
+                                throw new PeaQueryException();
+                        }
+                    }
+                }
+            } catch (Exception ex) {
+                sqlState = header.substring(1, 6);
+                sqlMessage = header.substring(6);
+                return new PeaAlterResponse(false, sqlMessage, sqlState, null);
+            }
+
+            int nb_col = listPrec.size();
+            String[] colname = new String[nb_col];
+
+            int sum_precision = 0;
+            for (int j = 0; j < nb_col; j++) {
+                colname[j] = listName.get(j).trim().toLowerCase();
+                sum_precision += Integer.parseInt(listPrec.get(j));
+            }
+
+            // send the second command to retrieve the data
+            String data = retrieveData("getd" + tb_query + END_PACK);
+
+            int nb_row = data.length() / sum_precision;
+            Hashtable<String, List<String>> result = buildResultSet(data, colname, nb_col, listScale, listPrec, listType);
+
+            for (int i = 0; i < nb_row; i++) {
+                tb_schema.put(
+                        result.get("column_name").get(i),
+                        new ColumnInfo(
+                                result.get("column_name").get(i), Integer.parseInt(result.get("ordinal_position").get(i)), result.get("data_type").get(i),
+                                Integer.parseInt(result.get("length").get(i)), Integer.parseInt(result.get("numeric_scale").get(i)), result.get("is_nullable").get(i),
+                                result.get("is_updatable").get(i), Integer.parseInt(result.get("numeric_precision").get(i))
+                        )
+                );
+            }
         }
 
         return new PeaAlterResponse(sqlState.equals("00000"), sqlMessage, sqlState, tb_schema);
@@ -554,111 +628,6 @@ public class PeaClient {
         return data.substring(0, data.length() - END_PACK.length());
     }
 
-    private Dictionary<String, ColumnInfo> retrieveTableSchema(String tableName, String schemaName) throws IOException, PeaUnsupportedOperationException {
-        String query =
-                "SELECT COLUMN_NAME, ORDINAL_POSITION, DATA_TYPE, LENGTH, NUMERIC_SCALE, IS_NULLABLE, IS_UPDATABLE, LONG_COMMENT, NUMERIC_PRECISION " +
-                        String.format("FROM QSYS2.SYSCOLUMNS WHERE SYSTEM_TABLE_NAME = %s AND SYSTEM_TABLE_SCHEMA = %s",
-                                tableName.toUpperCase(), schemaName.toUpperCase());
-
-        String header = retrieveData("geth" + query + END_PACK);
-
-        ArrayList<String> listName = new ArrayList<>(), listType = new ArrayList<>(), listPrec = new ArrayList<>(), listScale = new ArrayList<>();
-        try {
-            ObjectMapper mapper = new ObjectMapper();
-            ArrayList<Map<String, Object>> decodedData = mapper.readValue(header, new TypeReference<>() {
-            });
-            for (Map<String, Object> field : decodedData) {
-                for (String key : field.keySet()) {
-                    switch (key) {
-                        case "name":
-                            listName.add(field.get(key).toString());
-                            break;
-                        case "type":
-                            listType.add(field.get(key).toString());
-                            break;
-                        case "prec":
-                            listPrec.add(field.get(key).toString());
-                            break;
-                        case "scal":
-                            listScale.add(field.get(key).toString());
-                            break;
-                        default:
-                            throw new PeaQueryException();
-                    }
-                }
-            }
-        } catch (Exception ex) {
-            throw new PeaUnsupportedOperationException("It seems that the query your trying to make is not yet supported by Peasys, feel free to contact us");
-        }
-        int nb_col = listPrec.size();
-        String[] colname = new String[nb_col];
-
-        int sum_precision = 0;
-        for (int j = 0; j < nb_col; j++) {
-            colname[j] = listName.get(j).trim().toLowerCase();
-            sum_precision += Integer.parseInt(listPrec.get(j));
-        }
-
-        Hashtable<String, List<String>> result = new Hashtable<>();
-        for (int c = 0; c < nb_col; c++) {
-            result.put(colname[c], new ArrayList<>());
-        }
-
-        String data = retrieveData("getd" + query + END_PACK);
-
-        int nb_row = data.length() / sum_precision;
-        int pointer = 0;
-        while (!(pointer == data.length())) {
-            for (int m = 0; m < nb_col; m++) {
-                int scale = Integer.parseInt(listScale.get(m));
-                int precision = Integer.parseInt(listPrec.get(m));
-                int type = Integer.parseInt(listType.get(m));
-
-                // numeric packed
-                if ((type == 484 && scale != 0) || (type == 485 && scale != 0) || (type == 488 && scale != 0) || (type == 489 && scale != 0)) {
-                    double temp_float_data = Double.parseDouble(data.substring(pointer, pointer + precision)) / Math.pow(10, scale);
-                    pointer += precision;
-                    result.get(colname[m]).add(Double.toString(temp_float_data));
-                }
-                // long
-                else if (type == 492 || type == 493) {
-                    result.get(colname[m]).add(data.substring(pointer, pointer + 20));
-                    pointer += 20;
-                }
-                // int
-                else if (type == 496 || type == 497) {
-                    result.get(colname[m]).add(data.substring(pointer, pointer + 10));
-                    pointer += 10;
-                }
-                // short
-                else if (type == 500 || type == 501) {
-                    result.get(colname[m]).add(data.substring(pointer, pointer + 5));
-                    pointer += 5;
-                }
-                // String, date, time, timestamp
-                else {
-                    if (type == 389) {
-                        result.get(colname[m]).add(data.substring(pointer, pointer + precision));
-                    } else if (type == 385) {
-                        result.get(colname[m]).add(data.substring(pointer, pointer + precision));
-                    } else {
-                        result.get(colname[m]).add(data.substring(pointer, pointer + precision));
-                    }
-                    pointer += precision;
-                }
-            }
-        }
-
-        Hashtable<String, ColumnInfo> tb_name = new Hashtable<>();
-        for (List<String> list : result.values()) {
-            tb_name.put(list.get(0), new ColumnInfo(list.get(0), Integer.parseInt(list.get(1)), list.get(2),
-                    Integer.parseInt(list.get(3)), Integer.parseInt(list.get(4)), list.get(5), list.get(6),
-                    list.get(7), Integer.parseInt(list.get(8))));
-        }
-
-        return tb_name;
-    }
-
     private void sendStatistics(String data) throws PeaQueryException {
         try {
             URL obj = new URL(API_URL + "/api/license-key/update");
@@ -692,5 +661,51 @@ public class PeaClient {
         ObjectMapper mapper = new ObjectMapper();
         return mapper.readValue(response.toString(), new TypeReference<>() {
         });
+    }
+
+    private Hashtable<String, List<String>> buildResultSet(String data, String[] colname, int nb_col, List<String> listScale,
+                                                           List<String> listPrec, List<String> listType) throws IOException {
+        Hashtable<String, List<String>> result = new Hashtable<>();
+        for (int c = 0; c < nb_col; c++) {
+            result.put(colname[c], new ArrayList<>());
+        }
+
+        int pointer = 0;
+        while (!(pointer == data.length())) {
+            for (int m = 0; m < nb_col; m++) {
+                int scale = Integer.parseInt(listScale.get(m));
+                int precision = Integer.parseInt(listPrec.get(m));
+                int type = Integer.parseInt(listType.get(m));
+
+                // numeric packed
+                if ((type == 484 && scale != 0) || (type == 485 && scale != 0) || (type == 488 && scale != 0) || (type == 489 && scale != 0)) {
+                    double temp_float_data = Double.parseDouble(data.substring(pointer, pointer + precision)) / Math.pow(10, scale);
+                    pointer += precision;
+                    result.get(colname[m]).add(Double.toString(temp_float_data).trim());
+                }
+                // long
+                else if (type == 492 || type == 493) {
+                    result.get(colname[m]).add(data.substring(pointer, pointer + 20).trim());
+                    pointer += 20;
+                }
+                // int
+                else if (type == 496 || type == 497) {
+                    result.get(colname[m]).add(data.substring(pointer, pointer + 10).trim());
+                    pointer += 10;
+                }
+                // short
+                else if (type == 500 || type == 501) {
+                    result.get(colname[m]).add(data.substring(pointer, pointer + 5).trim());
+                    pointer += 5;
+                }
+                // String, date, time, timestamp
+                else {
+                    result.get(colname[m]).add(data.substring(pointer, pointer + precision).trim());
+                    pointer += precision;
+                }
+            }
+        }
+
+        return result;
     }
 }
