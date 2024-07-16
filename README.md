@@ -55,7 +55,7 @@ Peasys is a tool used along a license that should be found on the [dips400](http
 Peasys authenticates API requests using your license key, which you can find in the [dashboard](https://dips400.com/account).
 
 ```java
-PeaClient conn = new PeaClient("PARITION_NAME", PORT, "USERNAME", "PASSWORD", "FUTUR_LICENSE_KEY", true);
+PeaClient conn = new PeaClient("PARITION_NAME",  "PARTITION_NAME", PORT, "USERNAME", "PASSWORD", "FUTUR_LICENSE_KEY", true);
 System.out.println(conn.connectionStatus);
 System.out.println(conn.connexionMessage);            
 ```
